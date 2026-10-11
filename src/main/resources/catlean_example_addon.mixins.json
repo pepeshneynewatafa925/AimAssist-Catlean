@@ -1,0 +1,12 @@
+{
+  "required": true,
+  "package": "su.catlean.example.aimassist.mixin",
+  "compatibilityLevel": "JAVA_25",
+  "client": [
+    "MouseHandlerMixin",
+    "GameRendererMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}
