@@ -30,10 +30,7 @@ import kotlin.math.max
 import kotlin.math.sqrt
 import kotlin.random.Random
 
-enum class AimMode { FREE, LEGIT }
-
 object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot")) {
-    private var aimMode by setting("Rotation", AimMode.FREE)
     private var priority by setting("Priority", TargetPriority.DIRECTION)
     private var range by setting("Range", 4.5f, 1f..20f)
     private var fov by setting("FOV", 360f, 20f..360f)
@@ -52,19 +49,11 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
     private var disableOnWorldChange by setting("DisableOnWorldChange", true)
     private var lazyRotation by setting("LazyRotation", false)
 
-    // FreeAim settings.
-    private var freeSpeed by setting("Free-Speed", 15f, 5f..20f)
-    private var freeSmoothEntry by setting("Free-SmoothEntry", true)
-    private var freeSensitivity by setting("Free-AccountSensitivity", true)
-    private var freeNearSlow by setting("Free-NearSlowdown", true)
-    private var freeAimNoise by setting("Free-AimNoise", true)
-    private var freeSlowThreshold by setting("Free-SlowThreshold", 6f, 1f..20f)
-
     // LegitAim settings.
     private var legitSpeed by setting("Legit-Speed", 1f, 0.1f..3f)
-    private var legitSmoothing by setting("Legit-Smoothing", 1f, 0.2f..3f)
+    private var legitSmoothing by setting("Legit-Smoothing", 1.2f, 0.2f..3f)
     private var legitMaxLerp by setting("Legit-MaxLerp", 1.5f, 0.2f..2.5f)
-    private var legitMinLerp by setting("Legit-MinLerp", 0.05f, 0.01f..0.5f)
+    private var legitMinLerp by setting("Legit-MinLerp", 0.3f, 0.01f..0.5f)
     private var legitRandomization by setting("Legit-Randomization", true)
 
     private val targetTracker = TargetTracker(
@@ -80,8 +69,6 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
     private var targetRotation: Rotation? = null
     private var rawTargetRotation: Rotation? = null
     private var playerRotation: Rotation? = null
-    private var freePhaseYaw = 0.0
-    private var freeEntry = 0.0
     private var legitPhase = 0
     private var legitPhaseStarted = 0L
 
@@ -140,7 +127,7 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
         }
 
         val current = playerRotation!!
-        val smoothed = applyAimMode(current, result.rotation)
+        val smoothed = legitAim(current, result.rotation)
         rawTargetRotation = result.rotation
         targetRotation = smoothed
     }
@@ -251,35 +238,6 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
         return Vec3(centerX, box.minY + height * heightFactor, centerZ)
     }
 
-    private fun applyAimMode(current: Rotation, target: Rotation): Rotation {
-        return when (aimMode) {
-            AimMode.FREE -> freeAim(current, target)
-            AimMode.LEGIT -> legitAim(current, target)
-        }
-    }
-
-    private fun freeAim(current: Rotation, target: Rotation): Rotation {
-        val (yaw, pitch) = current.rotationDeltaTo(target)
-        val distance = sqrt(yaw * yaw + pitch * pitch).toDouble()
-        val deltaTime = 1.0 / 20.0
-        freePhaseYaw += Random.nextDouble(0.06, 0.18) * deltaTime
-        freeEntry = if (freeSmoothEntry) (freeEntry + 0.035 * freeSpeed * deltaTime).coerceAtMost(1.0) else 1.0
-
-        var factor = (freeSpeed / 15f).coerceIn(0.05f, 1f).toDouble()
-        factor *= (0.3 + smoothstep((distance / 40.0).coerceIn(0.0, 1.0)))
-        if (freeNearSlow && distance < freeSlowThreshold) factor *= max(0.2, distance / freeSlowThreshold)
-        factor *= freeEntry
-        if (freeAimNoise) {
-            factor *= 1.0 + sinNoise(freePhaseYaw) * 0.04
-        }
-        factor *= (if (freeSensitivity) sensitivityFactor() else 1.0)
-        factor = factor.coerceIn(0.003, 0.85)
-
-        val yawStep = yaw * factor
-        val pitchStep = pitch * factor
-        return Rotation(current.yaw + yawStep.toFloat(), current.pitch + pitchStep.toFloat())
-    }
-
     private fun legitAim(current: Rotation, target: Rotation): Rotation {
         val (yaw, pitch) = current.rotationDeltaTo(target)
         val distance = sqrt(yaw * yaw + pitch * pitch)
@@ -297,6 +255,7 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
         var lerp = (legitSpeed.toDouble() / 3.0) * randomFactor.toDouble() / legitSmoothing.toDouble()
         lerp *= if (distance < 15f) 0.7 else if (distance > 120f) 1.3 else 1.0
         lerp = lerp.coerceIn(legitMinLerp.toDouble(), legitMaxLerp.toDouble())
+        // LEGIT is yaw-only by design: pitch is left to the player.
         return Rotation(current.yaw + yaw * lerp.toFloat(), current.pitch)
     }
 
@@ -316,15 +275,6 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
     private fun isChargedCrossbow(): Boolean =
         CrossbowItem.isCharged(player.mainHandItem) || CrossbowItem.isCharged(player.offhandItem)
 
-    private fun sensitivityFactor(): Double {
-        val sensitivity = Minecraft.getInstance().options.sensitivity().get()
-        return (sensitivity * 2.0).coerceIn(0.3, 3.0)
-    }
-
-    private fun smoothstep(value: Double): Double = value * value * (3.0 - 2.0 * value)
-
-    private fun sinNoise(value: Double): Double = kotlin.math.sin(value) * 0.5 + kotlin.math.sin(value * 0.37) * 0.5
-
     private fun resetState() {
         currentTarget = null
         lastHitTarget = null
@@ -333,8 +283,6 @@ object AimAssistModule : AddonModule("Aim Assist", "legit", listOf("aa", "aimbot
         targetRotation = null
         rawTargetRotation = null
         playerRotation = null
-        freePhaseYaw = 0.0
-        freeEntry = 0.0
         legitPhase = 0
         legitPhaseStarted = System.currentTimeMillis()
     }
